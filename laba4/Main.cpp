@@ -1,107 +1,102 @@
 #define _CRT_SECURE_NO_WARNINGS
 #include <Windows.h>
-#include <stdio.h>
+#include <iostream>
+#include <vector>
 #include <conio.h>
 
 size_t arrSize = 0;
 size_t threadsAmnt = 0;
-int* common_array;
+int* common_array = nullptr;
+
 HANDLE hStartEvent;
 HANDLE hContinueEvent;
-HANDLE* stopEventsArr;
-BOOL* terminateEventsArr;
+std::vector<HANDLE> stopEventsArr;
+std::vector<BOOL> terminateEventsArr;
 CRITICAL_SECTION common_arrayCS;
 
-
 DWORD WINAPI Marker(LPVOID number);
-DWORD CloseThreads(HANDLE* thread_array, size_t size)
-{
-	for (size_t i = 0; i < size; i++)
-	{
-		DWORD result = CloseHandle(thread_array[i]);
-		if (NULL == result) return EXIT_FAILURE;
-	}
-	return EXIT_SUCCESS;
-}
-DWORD CheckError(DWORD valuable)
-{
-	if (NULL == valuable)
-	{
-		printf("Error occupied during threads start, error code: %u", valuable);
-		system("pause");
-		return EXIT_FAILURE;
-	}
-	return EXIT_SUCCESS;
+
+bool CheckHandle(HANDLE h) {
+    if (h == NULL) {
+        std::cerr << "Error during handle creation. Error code: " << GetLastError() << std::endl;
+        system("pause");
+        return false;
+    }
+    return true;
 }
 
-int main()
-{
-	printf("Enter array size: ");
-	scanf("%ud", &arrSize);
+bool CloseHandles(const std::vector<HANDLE>& handles) {
+    for (HANDLE h : handles) {
+        if (!CloseHandle(h)) return false;
+    }
+    return true;
+}
 
-	common_array = (int*)malloc(sizeof(int) * arrSize);
-	memset(common_array, 0, sizeof(int) * arrSize);
+int main() {
+    std::cout << "Enter array size: ";
+    std::cin >> arrSize;
 
-	printf("Enter amount of threads: ");
-	scanf("%ud", &threadsAmnt);
+    common_array = new int[arrSize] {};
+    
+    std::cout << "Enter number of threads: ";
+    std::cin >> threadsAmnt;
 
-	HANDLE* threadsArr = (HANDLE*)malloc(sizeof(HANDLE) * threadsAmnt);
-	stopEventsArr = (HANDLE*)malloc(sizeof(HANDLE) * threadsAmnt);
-	terminateEventsArr = (BOOL*)malloc(sizeof(BOOL) * threadsAmnt);
-	memset(terminateEventsArr, FALSE, sizeof(BOOL) * threadsAmnt);
+    std::vector<HANDLE> threadsArr(threadsAmnt);
+    stopEventsArr.resize(threadsAmnt);
+    terminateEventsArr.resize(threadsAmnt, FALSE);
 
-	hStartEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
-	if (CheckError(hStartEvent)) return EXIT_FAILURE;
-	hContinueEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
-	if (CheckError(hContinueEvent)) return EXIT_FAILURE;
+    hStartEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+    if (!CheckHandle(hStartEvent)) return EXIT_FAILURE;
 
-	InitializeCriticalSection(&common_arrayCS);
+    hContinueEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+    if (!CheckHandle(hContinueEvent)) return EXIT_FAILURE;
 
-	for (size_t i = 0; i < threadsAmnt; i++)
-	{
-		stopEventsArr[i] = CreateEvent(NULL, FALSE, FALSE, NULL);
-		if (CheckError(stopEventsArr[i])) return EXIT_FAILURE;
-		threadsArr[i] = CreateThread(NULL, 0, Marker, (LPVOID)i, 0, NULL);
-	}
+    InitializeCriticalSection(&common_arrayCS);
 
-	SetEvent(hStartEvent);
+    for (size_t i = 0; i < threadsAmnt; ++i) {
+        stopEventsArr[i] = CreateEvent(NULL, FALSE, FALSE, NULL);
+        if (!CheckHandle(stopEventsArr[i])) return EXIT_FAILURE;
 
-	int currThrdsAmnt = threadsAmnt;
-	while (-1 != currThrdsAmnt)
-	{
-		WaitForMultipleObjects(threadsAmnt, stopEventsArr, TRUE, 450);
-		printf("\nThreads stop working...\n");
+        threadsArr[i] = CreateThread(NULL, 0, Marker, (LPVOID)i, 0, NULL);
+        if (!CheckHandle(threadsArr[i])) return EXIT_FAILURE;
+    }
 
-		for (size_t i = 0; i < arrSize; i++) printf("%u ", common_array[i]);
+    SetEvent(hStartEvent);
 
-		if (0 == currThrdsAmnt) {
-			printf("\nNo threads are available....\n");
-			break;
-		}
+    int currThrdsAmnt = static_cast<int>(threadsAmnt);
+    while (currThrdsAmnt > 0) {
+        WaitForMultipleObjects(static_cast<DWORD>(threadsAmnt), stopEventsArr.data(), TRUE, 450);
+        std::cout << "\nThreads paused. Current array state:\n";
 
-		size_t currNum;
-		while (TRUE) {
-			printf("\nPlease, enter thread num to terminate : ");
-			
-			scanf("%u", &currNum);
-			if (terminateEventsArr[currNum - 1] == FALSE) {
-				break;
-			}
-		}
-		terminateEventsArr[currNum - 1] = TRUE;
-		PulseEvent(hContinueEvent);
-		--currThrdsAmnt;
-	}
-	DeleteCriticalSection(&common_arrayCS);
-	CloseThreads(threadsArr, threadsAmnt, CloseHandle);
-	CloseThreads(stopEventsArr, threadsAmnt, CloseHandle);
+        for (size_t i = 0; i < arrSize; ++i) {
+            std::cout << common_array[i] << ' ';
+        }
+        std::cout << std::endl;
 
-	free(threadsArr);
-	free(terminateEventsArr);
-	free(common_array);
-	free(stopEventsArr);
+        size_t currNum;
+        while (true) {
+            std::cout << "\nEnter thread number to terminate (1 to " << threadsAmnt << "): ";
+            std::cin >> currNum;
 
-	CloseHandle(hStartEvent);
-	CloseHandle(hContinueEvent);
-	return EXIT_SUCCESS;
+            if (currNum >= 1 && currNum <= threadsAmnt && !terminateEventsArr[currNum - 1])
+                break;
+            else
+                std::cout << "Invalid or already terminated.\n";
+        }
+
+        terminateEventsArr[currNum - 1] = TRUE;
+        PulseEvent(hContinueEvent);
+        --currThrdsAmnt;
+    }
+
+    DeleteCriticalSection(&common_arrayCS);
+    CloseHandles(threadsArr);
+    CloseHandles(stopEventsArr);
+
+    delete[] common_array;
+
+    CloseHandle(hStartEvent);
+    CloseHandle(hContinueEvent);
+
+    return EXIT_SUCCESS;
 }
