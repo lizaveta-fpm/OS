@@ -1,107 +1,71 @@
 #define _CRT_SECURE_NO_WARNINGS
 #include <Windows.h>
 #include <stdio.h>
-#include <conio.h>
+#include <math.h>
 
-size_t arrSize = 0;
-size_t threadsAmnt = 0;
-int* common_array;
-HANDLE hStartEvent;
-HANDLE hContinueEvent;
-HANDLE* stopEventsArr;
-BOOL* terminateEventsArr;
-CRITICAL_SECTION common_arrayCS;
+extern size_t arrSize;
+extern int* common_array;
+extern HANDLE hStartEvent;
+extern HANDLE hContinueEvent;
+extern HANDLE* stopEventsArr;
+extern BOOL* terminateEventsArr;
+extern CRITICAL_SECTION common_arrayCS;
 
 
-DWORD WINAPI Marker(LPVOID number);
-DWORD CloseThreads(HANDLE* thread_array, size_t size)
+
+DWORD WINAPI Marker(LPVOID number)
 {
-	for (size_t i = 0; i < size; i++)
+	// Thread initialization
+	size_t threadNum = (size_t)number;
+	size_t markedItems = 0;
+	int* positionsArr = (int*)malloc(sizeof(int)*arrSize);
+	memset(positionsArr, -1, sizeof(int) * arrSize);
+	srand(threadNum + 1);
+	printf("Thread %u created...\n", threadNum + 1);
+
+	// Wait for other threads and order from main thread
+	WaitForSingleObject(hStartEvent, INFINITE);
+
+	// Marks common_array elements
+	while (INFINITE)
 	{
-		DWORD result = CloseHandle(thread_array[i]);
-		if (NULL == result) return EXIT_FAILURE;
-	}
-	return EXIT_SUCCESS;
-}
-DWORD CheckError(DWORD valuable)
-{
-	if (NULL == valuable)
-	{
-		printf("Error occupied during threads start, error code: %u", valuable);
-		system("pause");
-		return EXIT_FAILURE;
-	}
-	return EXIT_SUCCESS;
-}
+		size_t position = rand() % arrSize;
+		EnterCriticalSection(&common_arrayCS);
+		if (0 == common_array[position] && markedItems < arrSize)
+		{
 
-int main()
-{
-	printf("Enter array size: ");
-	scanf("%ud", &arrSize);
-
-	common_array = (int*)malloc(sizeof(int) * arrSize);
-	memset(common_array, 0, sizeof(int) * arrSize);
-
-	printf("Enter amount of threads: ");
-	scanf("%ud", &threadsAmnt);
-
-	HANDLE* threadsArr = (HANDLE*)malloc(sizeof(HANDLE) * threadsAmnt);
-	stopEventsArr = (HANDLE*)malloc(sizeof(HANDLE) * threadsAmnt);
-	terminateEventsArr = (BOOL*)malloc(sizeof(BOOL) * threadsAmnt);
-	memset(terminateEventsArr, FALSE, sizeof(BOOL) * threadsAmnt);
-
-	hStartEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
-	if (CheckError(hStartEvent)) return EXIT_FAILURE;
-	hContinueEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
-	if (CheckError(hContinueEvent)) return EXIT_FAILURE;
-
-	InitializeCriticalSection(&common_arrayCS);
-
-	for (size_t i = 0; i < threadsAmnt; i++)
-	{
-		stopEventsArr[i] = CreateEvent(NULL, FALSE, FALSE, NULL);
-		if (CheckError(stopEventsArr[i])) return EXIT_FAILURE;
-		threadsArr[i] = CreateThread(NULL, 0, Marker, (LPVOID)i, 0, NULL);
-	}
-
-	SetEvent(hStartEvent);
-
-	int currThrdsAmnt = threadsAmnt;
-	while (-1 != currThrdsAmnt)
-	{
-		WaitForMultipleObjects(threadsAmnt, stopEventsArr, TRUE, 450);
-		printf("\nThreads stop working...\n");
-
-		for (size_t i = 0; i < arrSize; i++) printf("%u ", common_array[i]);
-
-		if (0 == currThrdsAmnt) {
-			printf("\nNo threads are available....\n");
-			break;
+			Sleep(5);
+			common_array[position] = threadNum + 1;
+			Sleep(5);
+			LeaveCriticalSection(&common_arrayCS);
+			positionsArr[position] = 0;
+			++markedItems;
 		}
+		else
+		{
+			LeaveCriticalSection(&common_arrayCS);
 
-		size_t currNum;
-		while (TRUE) {
-			printf("\nPlease, enter thread num to terminate : ");
-			
-			scanf("%u", &currNum);
-			if (terminateEventsArr[currNum - 1] == FALSE) {
+			printf("\nThread num %u\n", threadNum + 1);
+			printf("Elements marked %u\n", markedItems);
+			printf("Position of unmarkable element %u\n", position);
+			// End work and waiting for terminating
+
+			SignalObjectAndWait(stopEventsArr[threadNum], hContinueEvent, INFINITE, FALSE);
+			if (terminateEventsArr[threadNum])
+			{
+				// Threads dies, and makes marked common_array elements initial
+				EnterCriticalSection(&common_arrayCS);
+				for (size_t i = 0; i < arrSize; i++)
+				{
+					if (-1 != positionsArr[i]) common_array[i] = 0;
+				}
+				LeaveCriticalSection(&common_arrayCS);
+				printf("\nThread %u is dead...\n", threadNum + 1);
+				SetEvent(stopEventsArr[threadNum]);
 				break;
 			}
 		}
-		terminateEventsArr[currNum - 1] = TRUE;
-		PulseEvent(hContinueEvent);
-		--currThrdsAmnt;
 	}
-	DeleteCriticalSection(&common_arrayCS);
-	CloseThreads(threadsArr, threadsAmnt, CloseHandle);
-	CloseThreads(stopEventsArr, threadsAmnt, CloseHandle);
-
-	free(threadsArr);
-	free(terminateEventsArr);
-	free(common_array);
-	free(stopEventsArr);
-
-	CloseHandle(hStartEvent);
-	CloseHandle(hContinueEvent);
+	free(positionsArr);
 	return EXIT_SUCCESS;
 }
