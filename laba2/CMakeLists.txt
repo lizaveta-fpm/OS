@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.14)
 project(laba2)
 
 # Основной исполняемый файл
-add_executable(array_processor src/main.cpp)
+add_executable(laba2 main.cpp)
 
 # Включение тестов
 option(BUILD_TESTS "Build tests" ON)
